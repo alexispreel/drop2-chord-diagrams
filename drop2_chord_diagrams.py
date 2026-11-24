@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Drop 2 guitar chord diagram generator.
 
@@ -9,7 +10,6 @@ Usage:
     pip install reportlab
     python drop2_chord_diagrams.py                 # -> drop2_chord_diagrams.pdf
     python drop2_chord_diagrams.py out.pdf         # custom filename
-    python drop2_chord_diagrams.py --a4            # A4 instead of US Letter
 
 To add a chord quality, add one entry to QUALITIES (semitones + labels).
 """
@@ -19,85 +19,95 @@ from reportlab.lib.colors import HexColor, white, black
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
 
-# --------------------------------------------------------------------------
-# Theory data
-# --------------------------------------------------------------------------
-OPEN_STRINGS = [40, 45, 50, 55, 59, 64]            # MIDI: E2 A2 D3 G3 B3 E4 (low -> high)
-STRING_NAMES = ["6", "5", "4", "3", "2", "1"]       # string numbers, low -> high
+# Semitones above open low E string (standard tuning: E A D G B E)
+OPEN_STRINGS = [0, 5, 10, 15, 19, 24]
+STRING_NAMES = ["6", "5", "4", "3", "2", "1"]
 
-# name: (semitones above root, degree labels) for chord tones 1-3-5-7
+# Quality names, for chord tones 1-3-5-7
 QUALITIES = {
-    "Major 7":            ([0, 4, 7, 11], ["R", "3",  "5",  "7"]),
-    "Dominant 7":         ([0, 4, 7, 10], ["R", "3",  "5",  "b7"]),
-    "Minor 7":            ([0, 3, 7, 10], ["R", "b3", "5",  "b7"]),
+    "Major 7":              ([0, 4, 7, 11], ["R", "3",  "5",  "7"]),
+    "Dominant 7":           ([0, 4, 7, 10], ["R", "3",  "5",  "b7"]),
+    "Minor 7":              ([0, 3, 7, 10], ["R", "b3", "5",  "b7"]),
     "Minor 7b5 (half-dim)": ([0, 3, 6, 10], ["R", "b3", "b5", "b7"]),
-    "Diminished 7":       ([0, 3, 6, 9],  ["R", "b3", "b5", "bb7"]),
+    "Diminished 7":         ([0, 3, 6, 9],  ["R", "b3", "b5", "bb7"]),
 }
 
-# Qualities included when none are specified (CLI) and pre-checked in the web UI.
+# Qualities included when none are specified
 DEFAULT_QUALITIES = ["Major 7", "Dominant 7", "Minor 7", "Minor 7b5 (half-dim)"]
 
-STRING_SETS = [0, 1, 2]       # index of the lowest string of each 4-string group
+# Index of lowest string of each 4-string group
+STRING_SETS = [0, 1, 2]
+
+# Inversion names, for the 4 drop 2 voicings of each quality
 INVERSIONS = ["Root position", "1st inversion", "2nd inversion", "3rd inversion"]
 
-MAX_SPAN = 4                  # max fret stretch (frets between lowest & highest)
+# Max fret stretch, to keep positions playable on guitar
+MAX_SPAN = 4
 
 # Rows are 0-based: 0 = root in bass, 1 = 3rd, 2 = 5th, 3 = 7th.
-# Make a quality's voicing the exact same shape as a reference quality, shifted only
+# Make a quality voicing the exact same shape as a reference quality, shifted only
 # by the interval difference (Minor 7 vs Minor 7b5: just the 5th moves one fret).
 ALIGN_TO = {("Minor 7", 3): "Minor 7b5 (half-dim)"}
+
 # Force the first fret row shown in the diagram, so paired diagrams line up.
 WINDOW_START = {("Minor 7", 3): 1, ("Minor 7b5 (half-dim)", 3): 1}
 
 
-def drop2_order(inversion):
-    """Chord-tone indices (0=R,1=3rd,2=5th,3=7th), bottom -> top, for a drop 2 voicing.
+"""
+Chord-tone indices (0=R,1=3rd,2=5th,3=7th), bottom -> top, for drop 2 voicing.
 
-    `inversion` is the bass note of the voicing: 0 = root, 1 = 3rd, 2 = 5th, 3 = 7th.
-    Built from a close-position chord with the 2nd voice from the top dropped
-    down an octave (it becomes the bass note).
-    """
-    # Rows are named by the BASS note of the drop 2 voicing (0 = root in the bass,
-    # 1 = 3rd, 2 = 5th, 3 = 7th). Dropping the 2nd voice from the top puts the
-    # close-position chord's 3rd-from-bottom tone in the bass, hence the +2 offset.
-    # (Before this fix the rows were numbered by the close-position inversion,
-    # so the "root position" row actually had the 5th in the bass.)
+`inversion`: bass note of voicing, i.e. 0 = root, 1 = 3rd, 2 = 5th, 3 = 7th.
+Built by dropping 2nd voice from top to down an octave, then reordering to bottom -> top.
+"""
+def drop2_order(inversion: int) -> list[int]:
     close = [(inversion + 2 + i) % 4 for i in range(4)]
     return [close[2], close[0], close[1], close[3]]
 
 
-def place_voicing(semis, order, first_string):
-    """Find the lowest-position fingering on 4 adjacent strings.
+"""
+To find the lowest-position fingering on 4 adjacent strings.
 
-    Each note is the nearest matching pitch above the previous one, which is
-    exactly how a drop 2 voicing stacks. Returns list of (string_idx, fret).
-    """
+Each note is nearest matching pitch above previous one, which is
+exactly how a drop 2 voicing stacks.
+"""
+def place_voicing(semi_tones: list[int], order: list[int], first_string: int) -> list[tuple[int, int]]:
     for fret0 in range(1, 13):
-        # pitch of bass note on the lowest string; derive the root's pitch class
-        p = OPEN_STRINGS[first_string] + fret0
-        root_pc = (p - semis[order[0]]) % 12
+        # Pitch of bass note on lowest string
+        pitch = OPEN_STRINGS[first_string] + fret0
+
+        # Pitch class of bass note, relative to chord's root
+        root_pitch_class = (pitch - semi_tones[order[0]]) % 12
+
+        # Initialize fret finger positions with bass first
         frets = [fret0]
+
         ok = True
         for k in range(1, 4):
-            target_pc = (root_pc + semis[order[k]]) % 12
-            s = first_string + k
-            # next pitch above p with the target pitch class
-            step = (target_pc - p) % 12
+            # Target pitch class of next note, relative to chord's root
+            target_pitch_class = (root_pitch_class + semi_tones[order[k]]) % 12
+            strg = first_string + k
+
+            # Next pitch above previous note, with same pitch class as target
+            step = (target_pitch_class - pitch) % 12
             step = step or 12
-            p += step
-            fret = p - OPEN_STRINGS[s]
+            pitch += step
+
+            # Fret number on current string
+            fret = pitch - OPEN_STRINGS[strg]
             if fret < 1 or fret > 15:
                 ok = False
                 break
+
+            # Add position to list of frets
             frets.append(fret)
+
         if ok and max(frets) - min(frets) <= MAX_SPAN:
             return [(first_string + k, frets[k]) for k in range(4)]
-    raise RuntimeError("no fingering found")
+        
+    raise RuntimeError("no fingering found for semi_tones={} order={} first_string={}".format(semi_tones, order, first_string))
 
 
-# --------------------------------------------------------------------------
-# Drawing
-# --------------------------------------------------------------------------
+# Chord voice colors: 1 color for each voice degree (root, 3rd, 5th, 7th).
 DEGREE_COLORS = {
     "R":   HexColor("#1f6fd1"),   # blue
     "3":   HexColor("#d6336c"),   # magenta/red
@@ -109,42 +119,53 @@ DEGREE_COLORS = {
     "bb7": HexColor("#e67700"),
 }
 
-STR_GAP = 17        # horizontal spacing between strings (pt)
-FRET_GAP = 19       # vertical spacing between frets (pt)
-N_FRETS = MAX_SPAN + 1
+# Horizontal spacing between strings (pt)
+STR_GAP = 17
+
+# Vertical spacing between frets (pt)
+FRET_GAP = 19
+
+# Number of frets shown on diagram
+FRET_COUNT = MAX_SPAN + 1
+
+# Radius of chord-tone dots (pt)
 DOT_R = 7.2
 
 
+"""
+To draw one chord box. (x, y_top) = top-left of string/fret grid.
+
+notes: list of (string_idx, fret); labels: degree label per note.
+"""
 def draw_diagram(c, x, y_top, notes, labels, start=None):
-    """Draw one chord box. (x, y_top) = top-left of the string/fret grid.
-
-    notes: list of (string_idx, fret); labels: degree label per note.
-    """
     width = STR_GAP * 5
-    height = FRET_GAP * N_FRETS
+    height = FRET_GAP * FRET_COUNT
     f_min = min(f for _, f in notes)
-    start = f_min if start is None else start   # first fret row shown
 
-    # muted strings (x) above the grid
-    used = {s for s, _ in notes}
+    # First fret row shown in diagram, so paired diagrams line up
+    start = f_min if start is None else start
+
+    # Muted strings: 'x' label above grid
+    used = {strg for strg, _ in notes}
     c.setFillColor(HexColor("#888888"))
     c.setFont("Helvetica", 7)
-    for s in range(6):
-        if s not in used:
-            c.drawCentredString(x + s * STR_GAP, y_top + 4, "x")
+    for strg in range(6):
+        if strg not in used:
+            c.drawCentredString(x + strg * STR_GAP, y_top + 4, "x")
 
-    # fret lines
+    # Fret lines
     c.setStrokeColor(HexColor("#555555"))
-    for i in range(N_FRETS + 1):
+    for i in range(FRET_COUNT + 1):
         c.setLineWidth(0.8)
         yy = y_top - i * FRET_GAP
         c.line(x, yy, x + width, yy)
-    # strings (thicker toward the bass)
-    for s in range(6):
-        c.setLineWidth(1.1 - s * 0.12)
-        c.line(x + s * STR_GAP, y_top, x + s * STR_GAP, y_top - height)
+    
+    # Strings (thinner toward high, thicker toward low)
+    for strg in range(6):
+        c.setLineWidth(1.1 - strg * 0.12)
+        c.line(x + strg * STR_GAP, y_top, x + strg * STR_GAP, y_top - height)
 
-    # # starting-fret label
+    # # Starting-fret label
     # if True:
     #     c.setFillColor(black)
     #     c.setFont("Helvetica-Bold", 8)
@@ -152,9 +173,9 @@ def draw_diagram(c, x, y_top, notes, labels, start=None):
     #     c.setFont("Helvetica", 6)
     #     c.drawRightString(x - 6, y_top - FRET_GAP / 2 - 10, "fret")
 
-    # dots
-    for (s, f), lab in zip(notes, labels):
-        cx = x + s * STR_GAP
+    # Finger colored dots
+    for (strg, f), lab in zip(notes, labels):
+        cx = x + strg * STR_GAP
         cy = y_top - (f - start) * FRET_GAP - FRET_GAP / 2
         c.setFillColor(DEGREE_COLORS[lab])
         c.setStrokeColor(DEGREE_COLORS[lab])
@@ -164,6 +185,9 @@ def draw_diagram(c, x, y_top, notes, labels, start=None):
         c.drawCentredString(cx, cy - 2.3, lab)
 
 
+"""
+To draw legend as page footer.
+"""
 def draw_legend(c, x, y):
     c.setFont("Helvetica", 7.5)
     items = [("R", "Root"), ("3", "3rd / b3"), ("5", "5th / b5"), ("7", "7th / b7 / bb7")]
@@ -176,13 +200,13 @@ def draw_legend(c, x, y):
         x += 14 + c.stringWidth(text, "Helvetica", 7.5) + 18
 
 
-# def build_pdf(path, pagesize=letter):
-def build_pdf(path, qualities=None):
-    """Write the PDF to `path` (a filename or a file-like object such as BytesIO).
+"""
+To write the PDF to `path`.
 
-    qualities: iterable of keys of QUALITIES to include (default: DEFAULT_QUALITIES).
-    Pages always follow the order of QUALITIES, whatever order is passed in.
-    """
+qualities: iterable of keys of QUALITIES to be included (default: DEFAULT_QUALITIES).
+"""
+def build_pdf(path, qualities=None):
+    # Check quality input against constants, and sort as constants
     wanted = set(DEFAULT_QUALITIES if qualities is None else qualities)
     unknown = wanted - set(QUALITIES)
     if unknown:
@@ -191,23 +215,26 @@ def build_pdf(path, qualities=None):
     if not selected:
         raise ValueError("select at least one chord quality")
 
+    # Create PDF canvas
     W, H = A4
     c = canvas.Canvas(path, pagesize=A4)
     c.setTitle("Drop 2 guitar chord voicings")
     c.setAuthor("drop2_chord_diagrams.py")
 
+    # Layout constants
     margin = 36
-    label_w = 78    # with row-label column; the 3 diagram columns use the remaining width
-    # label_w = 0   # no row-label column; the 3 diagram columns use the full width
+    label_w = 78
     col_w = (W - 2 * margin - label_w) / 3
     header_h = 66
     footer_h = 40
     row_h = (H - 2 * margin - header_h - footer_h) / 4
     grid_w = STR_GAP * 5
 
+    # Browse through chord qualities, one page per quality
     for qname in selected:
-        semis, labs = QUALITIES[qname]
-        # ---- title ----
+        semi_tones, labs = QUALITIES[qname]
+
+        # Page header
         c.setFillColor(black)
         c.setFont("Helvetica-Bold", 18)
         c.drawString(margin, H - margin - 14, f"Drop 2 voicings \u2013 {qname}")
@@ -217,7 +244,7 @@ def build_pdf(path, qualities=None):
                      "Chord tones R\u2013" + "\u2013".join(labs[1:]) +
                      "  |  movable shapes, standard tuning  |  bass note at left")
 
-        # ---- column headers ----
+        # Column headers: one per string set
         top = H - margin - header_h
         c.setFillColor(black)
         c.setFont("Helvetica-Bold", 10)
@@ -229,7 +256,7 @@ def build_pdf(path, qualities=None):
         c.setLineWidth(0.6)
         c.line(margin, top, W - margin, top)
 
-        # ---- rows ----
+        # Rows: one per inversion (root, 3rd, 5th, 7th as bass)
         for i, inv_name in enumerate(INVERSIONS):
             row_top = top - i * row_h
             order = drop2_order(i)
@@ -245,12 +272,12 @@ def build_pdf(path, qualities=None):
             # c.drawString(margin, row_top - 46, "(low \u2192 high)")
 
             for j, s0 in enumerate(STRING_SETS):
-                notes = place_voicing(semis, order, s0)
+                notes = place_voicing(semi_tones, order, s0)
                 ref = ALIGN_TO.get((qname, i))
                 if ref:
                     ref_semis, _ = QUALITIES[ref]
                     ref_notes = place_voicing(ref_semis, order, s0)
-                    notes = [(st, f + semis[k] - ref_semis[k])
+                    notes = [(st, f + semi_tones[k] - ref_semis[k])
                              for (st, f), k in zip(ref_notes, order)]
                 gx = margin + label_w + j * col_w + (col_w - grid_w) / 2
                 draw_diagram(c, gx, row_top - 22, notes, degs,
@@ -259,7 +286,7 @@ def build_pdf(path, qualities=None):
             c.setStrokeColor(HexColor("#dddddd"))
             c.line(margin, row_top - row_h, W - margin, row_top - row_h)
 
-        # ---- footer ----
+        # Page footer: legend
         draw_legend(c, margin, margin + 6)
         c.setFont("Helvetica", 7)
         c.setFillColor(HexColor("#777777"))
@@ -272,7 +299,6 @@ def build_pdf(path, qualities=None):
 
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    size = A4 if "--a4" in sys.argv else letter
     out = args[0] if args else "drop2_chord_diagrams.pdf"
     build_pdf(out)
     print(f"wrote {out}")
