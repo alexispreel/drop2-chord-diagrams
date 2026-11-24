@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drop 2 chord diagrams</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7385; --line:#dfe3ea;
+            --accent:#1f6fd1; --off:#c3c9d4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#14171d; --card:#1d222c; --text:#e8ebf1; --muted:#98a1b3; --line:#2d3441;
+              --accent:#4d93ec; --off:#4a5262; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font:16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width:520px; margin:6vh auto; padding:0 16px; }
+    form { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; }
+    h1 { font-size:1.35rem; margin:0 0 4px; }
+    p.sub { margin:0 0 20px; color:var(--muted); font-size:.92rem; }
+    fieldset { border:0; padding:0; margin:0 0 20px; }
+    legend { font-weight:600; margin-bottom:8px; padding:0; }
+    .row { display:flex; align-items:center; justify-content:space-between;
+           padding:10px 0; border-top:1px solid var(--line); cursor:pointer; }
+    .row:first-of-type { border-top:0; }
+    .switch { position:relative; width:44px; height:24px; flex:none; }
+    .switch input { position:absolute; inset:0; width:100%; height:100%; margin:0;
+                    opacity:0; cursor:pointer; }
+    .track { position:absolute; inset:0; background:var(--off); border-radius:12px;
+             transition:background .15s; pointer-events:none; }
+    .track::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px;
+                    background:#fff; border-radius:50%; transition:transform .15s; }
+    .switch input:checked + .track { background:var(--accent); }
+    .switch input:checked + .track::after { transform:translateX(20px); }
+    .switch input:focus-visible + .track { outline:2px solid var(--accent); outline-offset:2px; }
+    label.field { display:block; font-weight:600; margin-bottom:6px; }
+    input[type=text] { width:100%; padding:10px 12px; font:inherit; color:var(--text);
+                       background:var(--bg); border:1px solid var(--line); border-radius:8px; }
+    input[type=text]:focus { outline:2px solid var(--accent); outline-offset:1px; }
+    button { margin-top:22px; width:100%; padding:12px; font:inherit; font-weight:600;
+             color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    #err { color:#d6336c; font-size:.9rem; margin:12px 0 0; min-height:1.2em; }
+  </style>
+</head>
+<body>
+<main>
+  <form id="f" method="post" action="/generate">
+    <h1>Drop 2 chord diagrams</h1>
+    <p class="sub">Pick the chord qualities to include, then download the printable PDF.</p>
+
+    <fieldset>
+      <legend>Chord qualities</legend>
+      {% for name, on in qualities %}
+      <label class="row">
+        <span>{{ name }}</span>
+        <span class="switch">
+          <input type="checkbox" name="quality" value="{{ name }}" {{ "checked" if on }}>
+          <span class="track"></span>
+        </span>
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <label class="field" for="filename">Output file name</label>
+    <input id="filename" type="text" name="filename" value="{{ default_filename }}"
+           autocomplete="off" spellcheck="false">
+
+    <button type="submit">Generate PDF</button>
+    <p id="err" role="alert"></p>
+  </form>
+</main>
+<script>
+  document.getElementById("f").addEventListener("submit", function (e) {
+    var any = this.querySelector('input[name="quality"]:checked');
+    document.getElementById("err").textContent = any ? "" : "Select at least one chord quality.";
+    if (!any) e.preventDefault();
+  });
+</script>
+</body>
+</html>
