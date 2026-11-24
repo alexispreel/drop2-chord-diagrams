@@ -4,7 +4,10 @@ Generates printable fretboard diagrams for every drop 2 voicing (4 bass-note
 inversions x 3 adjacent string sets) of the common seventh-chord qualities,
 one PDF page per quality.
 
-## Web page
+## Live site
+Currently hosted on [Lovable](https://repo-to-website-harbor.lovable.app/).
+
+## Local testing
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
